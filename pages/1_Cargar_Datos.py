@@ -13,6 +13,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import CUIT_EMPRESA, BANCOS
+from utils.formato import formato_moneda, formato_numero, formato_df_moneda
 from parsers.parser_macro import ParserMacro
 from parsers.parser_nacion import ParserNacion
 from parsers.parser_santander import ParserSantander
@@ -105,23 +106,37 @@ with tab1:
                         
                         col1, col2, col3 = st.columns(3)
                         with col1:
-                            st.metric("Ingresos Operativos", f"${eerr['total_ingresos']:,.2f}")
+                            st.metric("Ingresos Operativos", formato_moneda(eerr['total_ingresos']))
                         with col2:
-                            st.metric("Egresos Operativos", f"${eerr['total_egresos']:,.2f}")
+                            st.metric("Egresos Operativos", formato_moneda(eerr['total_egresos']))
                         with col3:
                             resultado = eerr['resultado_neto']
-                            st.metric("Resultado Neto", f"${resultado:,.2f}")
+                            st.metric("Resultado Neto", formato_moneda(resultado))
                         
                         # Traspasos
                         if eerr['traspasos_entrada'] > 0 or eerr['traspasos_salida'] > 0:
-                            st.warning(f"🔄 Traspasos internos detectados: Entrada ${eerr['traspasos_entrada']:,.2f} | Salida ${eerr['traspasos_salida']:,.2f}")
+                            st.warning(
+                                f"🔄 Traspasos internos detectados: Entrada {formato_moneda(eerr['traspasos_entrada'])} | "
+                                f"Salida {formato_moneda(eerr['traspasos_salida'])}"
+                            )
                         
                         # Preview de movimientos
                         st.subheader("Vista previa de movimientos")
                         df_preview = pd.DataFrame(movimientos[:20])
                         if 'fecha' in df_preview.columns:
                             df_preview['fecha'] = pd.to_datetime(df_preview['fecha']).dt.strftime('%d/%m/%Y')
-                        st.dataframe(df_preview, use_container_width=True)
+                        _fmt_prev = {
+                            c: formato_df_moneda
+                            for c in ('debito', 'credito', 'saldo')
+                            if c in df_preview.columns
+                        }
+                        if _fmt_prev:
+                            st.dataframe(
+                                df_preview.style.format(_fmt_prev),
+                                use_container_width=True,
+                            )
+                        else:
+                            st.dataframe(df_preview, use_container_width=True)
                         
                         # Botón para guardar
                         if st.button("💾 Guardar en Base de Datos", key="save_banco"):
@@ -202,9 +217,9 @@ with tab2:
                     
                     col1, col2, col3 = st.columns(3)
                     with col1:
-                        st.metric("Total Ventas $", f"${resumen['total_pesos']:,.2f}")
+                        st.metric("Total Ventas $", formato_moneda(resumen['total_pesos']))
                     with col2:
-                        st.metric("Total Ventas Kg", f"{resumen['total_kgs']:,.2f}")
+                        st.metric("Total Ventas Kg", f"{formato_numero(resumen['total_kgs'], 2)} kg")
                     with col3:
                         st.metric("Días", resumen['dias'])
                     
@@ -279,7 +294,7 @@ with tab3:
                     
                     col1, col2 = st.columns(2)
                     with col1:
-                        st.metric("Total Pagos Efectivo", f"${resumen['total']:,.2f}")
+                        st.metric("Total Pagos Efectivo", formato_moneda(resumen['total']))
                     with col2:
                         st.metric("Cantidad", resumen['cantidad'])
                     
@@ -290,7 +305,11 @@ with tab3:
                             {"Categoría": k, "Monto": v}
                             for k, v in sorted(resumen['por_categoria'].items(), key=lambda x: -x[1])
                         ])
-                        st.dataframe(df_cat, use_container_width=True)
+                        st.dataframe(
+                            df_cat.style.format({"Monto": formato_df_moneda}),
+                            use_container_width=True,
+                            hide_index=True,
+                        )
                     
                     # Botón para guardar
                     if st.button("💾 Guardar Pagos", key="save_efectivo"):

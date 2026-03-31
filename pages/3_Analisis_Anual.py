@@ -15,7 +15,12 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import NOMBRE_EMPRESA
-from utils.formato import formato_moneda, formato_porcentaje, formato_df_moneda, formato_df_porcentaje
+from utils.formato import formato_moneda, formato_numero, formato_porcentaje, formato_df_moneda, formato_df_porcentaje
+from utils.charts import (
+    grafico_lineas_multiserie_moneda,
+    grafico_barras_desde_serie,
+    grafico_barras_apiladas_mes_moneda,
+)
 
 st.set_page_config(page_title="Análisis Anual", page_icon="📈", layout="wide")
 
@@ -121,10 +126,14 @@ try:
         col1, col2 = st.columns([3, 1])
         
         with col1:
-            df_chart = df_meses[['mes_nombre', 'ventas_pesos', 'egresos']].copy()
-            df_chart = df_chart.set_index('mes_nombre')
-            df_chart.columns = ['Ventas', 'Egresos']
-            st.line_chart(df_chart)
+            st.caption("Montos en tooltip: **$** y separador de miles (formato local).")
+            grafico_lineas_multiserie_moneda(
+                df_meses,
+                "mes_nombre",
+                ["ventas_pesos", "egresos"],
+                ["Ventas", "Egresos"],
+                titulo="Ventas vs egresos",
+            )
         
         with col2:
             st.write("**Promedio mensual:**")
@@ -138,16 +147,20 @@ try:
         
         df_resultado = df_meses[['mes_nombre', 'resultado']].set_index('mes_nombre')
         df_resultado.columns = ['Resultado']
-        st.bar_chart(df_resultado)
+        grafico_barras_desde_serie(df_resultado['Resultado'], titulo="Resultado operativo mensual", horizontal=False)
         
         # Composición de egresos
         if resumen['total_egresos_bancarios'] > 0 or resumen['total_egresos_efectivo'] > 0:
             st.subheader("💳 Composición de Egresos por Mes")
             
-            df_egresos = df_meses[['mes_nombre', 'egresos_bancarios', 'egresos_efectivo']].copy()
-            df_egresos = df_egresos.set_index('mes_nombre')
-            df_egresos.columns = ['Gastos Bancarios', 'Pagos Efectivo']
-            st.bar_chart(df_egresos)
+            df_eg = df_meses[['mes_nombre', 'egresos_bancarios', 'egresos_efectivo']].copy()
+            grafico_barras_apiladas_mes_moneda(
+                df_eg,
+                'mes_nombre',
+                ['egresos_bancarios', 'egresos_efectivo'],
+                etiquetas=['Gastos Bancarios', 'Pagos Efectivo'],
+                titulo='Composición de egresos (bancarios + efectivo)',
+            )
         
         # Tabla detallada
         st.subheader("📋 Detalle por Mes")
@@ -195,7 +208,7 @@ try:
             col1, col2 = st.columns(2)
             
             with col1:
-                st.metric("Total Kg Vendidos", f"{resumen['total_ventas_kgs']:,.2f} kg".replace(",", "."))
+                st.metric("Total Kg Vendidos", f"{formato_numero(resumen['total_ventas_kgs'], 2)} kg")
                 
                 # Precio promedio por kg
                 if resumen['total_ventas_kgs'] > 0:
@@ -204,9 +217,9 @@ try:
             
             with col2:
                 # Gráfico de kg por mes
-                df_kgs = df_meses[['mes_nombre', 'ventas_kgs']].set_index('mes_nombre')
-                df_kgs.columns = ['Kg Vendidos']
-                st.bar_chart(df_kgs)
+                df_kgs = df_meses[['mes_nombre', 'ventas_kgs']].copy()
+                st.caption("Kilogramos (sin $).")
+                st.bar_chart(df_kgs.set_index('mes_nombre')['ventas_kgs'])
         
         # =========================================
         # INFORMACIÓN BANCARIA (REFERENCIA)

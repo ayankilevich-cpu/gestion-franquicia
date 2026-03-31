@@ -18,3 +18,11 @@ venv/
 # Archivos de sistema/editor
 .idea/
 .vscode/
+
+# Extractos, ventas y demos locales en raíz (no versionar)
+/Resumen.pdf
+/Resumen.xlsx
+/Ventas_Mes.xlsx
+/Ultimos movimientos.pdf
+/2025-12-30_00720456005000065896.pdf
+/demo_gestion_financiera.webm

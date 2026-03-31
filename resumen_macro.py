@@ -9,6 +9,8 @@ from datetime import datetime
 from collections import defaultdict
 import pandas as pd
 
+from utils.formato import formato_moneda
+
 # Para leer PDFs - usar pdfplumber que es más preciso con tablas
 try:
     import pdfplumber
@@ -103,6 +105,9 @@ CATEGORIAS_EGRESOS = {
     ],
     'Préstamos Bancarios': [
         'N/D DEBITO PRESTAMOS',
+        'DEBITO PAGO PRESTAMO',
+        'PAGO PRESTAMO',
+        'Cobro de prestamo',
     ],
     'Intereses Bancarios': [
         'N/D INTER.ADEL.CC',
@@ -477,32 +482,38 @@ def imprimir_eerr(eerr: dict, periodo: str = ''):
     print("\n📈 INGRESOS OPERATIVOS (Créditos de terceros)")
     print("-" * 60)
     for categoria, monto in sorted(eerr['ingresos'].items(), key=lambda x: -x[1]):
-        print(f"  {categoria:<40} $ {monto:>15,.2f}")
+        print(f"  {categoria:<40} {formato_moneda(monto):>22}")
     print("-" * 60)
-    print(f"  {'TOTAL INGRESOS OPERATIVOS':<40} $ {eerr['total_ingresos']:>15,.2f}")
+    print(f"  {'TOTAL INGRESOS OPERATIVOS':<40} {formato_moneda(eerr['total_ingresos']):>22}")
     
     print("\n📉 EGRESOS OPERATIVOS (Débitos a terceros)")
     print("-" * 60)
     for categoria, monto in sorted(eerr['egresos'].items(), key=lambda x: -x[1]):
-        print(f"  {categoria:<40} $ {monto:>15,.2f}")
+        print(f"  {categoria:<40} {formato_moneda(monto):>22}")
     print("-" * 60)
-    print(f"  {'TOTAL EGRESOS OPERATIVOS':<40} $ {eerr['total_egresos']:>15,.2f}")
+    print(f"  {'TOTAL EGRESOS OPERATIVOS':<40} {formato_moneda(eerr['total_egresos']):>22}")
     
     print("\n" + "=" * 70)
     resultado = eerr['resultado_neto']
     emoji = "✅" if resultado >= 0 else "❌"
-    print(f"  {emoji} {'RESULTADO OPERATIVO NETO':<38} $ {resultado:>15,.2f}")
+    print(f"  {emoji} {'RESULTADO OPERATIVO NETO':<38} {formato_moneda(resultado):>22}")
     print("=" * 70)
     
     # Mostrar traspasos internos (informativos, no afectan el resultado)
     if eerr.get('traspasos_entrada', 0) > 0 or eerr.get('traspasos_salida', 0) > 0:
         print("\n🔄 TRASPASOS ENTRE CUENTAS PROPIAS (No afectan el resultado)")
         print("-" * 60)
-        print(f"  {'Entradas desde otras cuentas propias':<40} $ {eerr.get('traspasos_entrada', 0):>15,.2f}")
-        print(f"  {'Salidas hacia otras cuentas propias':<40} $ {eerr.get('traspasos_salida', 0):>15,.2f}")
+        print(
+            f"  {'Entradas desde otras cuentas propias':<40} {formato_moneda(eerr.get('traspasos_entrada', 0)):>22}"
+        )
+        print(
+            f"  {'Salidas hacia otras cuentas propias':<40} {formato_moneda(eerr.get('traspasos_salida', 0)):>22}"
+        )
         print("-" * 60)
         neto_traspasos = eerr.get('traspasos_neto', 0)
-        print(f"  {'Neto Traspasos (entrada - salida)':<40} $ {neto_traspasos:>15,.2f}")
+        print(
+            f"  {'Neto Traspasos (entrada - salida)':<40} {formato_moneda(neto_traspasos):>22}"
+        )
         print("=" * 70)
 
 
@@ -639,7 +650,7 @@ def analizar_movimientos_detalle(movimientos: list, n: int = 20):
         monto = mov['credito'] if mov['credito'] > 0 else mov['debito']
         print(f"\n{i+1}. {mov['fecha'].strftime('%d/%m/%y')} - {tipo}")
         print(f"   Descripción: {mov['descripcion']}")
-        print(f"   Monto: ${monto:,.2f}")
+        print(f"   Monto: {formato_moneda(monto)}")
         if mov['referencia']:
             print(f"   Referencia: {mov['referencia']}")
 
@@ -662,7 +673,10 @@ if __name__ == '__main__':
             for mov in movimientos[:15]:
                 tipo = "+" if mov['credito'] > 0 else "-"
                 monto = mov['credito'] if mov['credito'] > 0 else mov['debito']
-                print(f"  {mov['fecha'].strftime('%d/%m')} {tipo} ${monto:>12,.2f}  {mov['descripcion'][:45]}")
+                print(
+                    f"  {mov['fecha'].strftime('%d/%m')} {tipo} {formato_moneda(monto):>18}  "
+                    f"{mov['descripcion'][:45]}"
+                )
     else:
         print(f"❌ No se encontró el archivo: {PDF_PATH}")
         print("   Por favor, especifica la ruta correcta al PDF del extracto.")

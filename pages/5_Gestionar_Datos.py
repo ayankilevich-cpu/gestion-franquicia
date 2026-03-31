@@ -1,9 +1,15 @@
 """
 Página para gestionar datos cargados - ver y eliminar.
 """
+import os
+import sys
+
 import streamlit as st
 import pandas as pd
 from datetime import datetime
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from utils.formato import formato_moneda, formato_numero
 
 st.set_page_config(page_title="Gestionar Datos", page_icon="🗂️", layout="wide")
 
@@ -62,10 +68,10 @@ with tab1:
                 lambda x: f"{x['mes']:02d}/{x['anio']}", axis=1
             )
             df_resumen['total_creditos'] = df_resumen['total_creditos'].apply(
-                lambda x: f"${x:,.2f}" if x else "$0.00"
+                lambda x: formato_moneda(float(x)) if x is not None else formato_moneda(0)
             )
             df_resumen['total_debitos'] = df_resumen['total_debitos'].apply(
-                lambda x: f"${x:,.2f}" if x else "$0.00"
+                lambda x: formato_moneda(float(x)) if x is not None else formato_moneda(0)
             )
             
             st.dataframe(
@@ -263,8 +269,12 @@ with tab3:
         if ventas:
             df_ventas = pd.DataFrame(ventas)
             df_ventas['periodo'] = df_ventas.apply(lambda x: f"{x['mes']:02d}/{x['anio']}", axis=1)
-            df_ventas['total_pesos'] = df_ventas['total_pesos'].apply(lambda x: f"${x:,.2f}" if x else "$0.00")
-            df_ventas['total_kg'] = df_ventas['total_kg'].apply(lambda x: f"{x:,.2f} kg" if x else "0 kg")
+            df_ventas['total_pesos'] = df_ventas['total_pesos'].apply(
+                lambda x: formato_moneda(float(x)) if x is not None else formato_moneda(0)
+            )
+            df_ventas['total_kg'] = df_ventas['total_kg'].apply(
+                lambda x: f"{formato_numero(float(x), 2)} kg" if x is not None else "0 kg"
+            )
             
             st.dataframe(
                 df_ventas[['periodo', 'registros', 'total_pesos', 'total_kg', 'desde', 'hasta']],
@@ -330,7 +340,9 @@ with tab4:
         if pagos:
             df_pagos = pd.DataFrame(pagos)
             df_pagos['periodo'] = df_pagos.apply(lambda x: f"{x['mes']:02d}/{x['anio']}", axis=1)
-            df_pagos['total'] = df_pagos['total'].apply(lambda x: f"${x:,.2f}" if x else "$0.00")
+            df_pagos['total'] = df_pagos['total'].apply(
+                lambda x: formato_moneda(float(x)) if x is not None else formato_moneda(0)
+            )
             
             st.dataframe(
                 df_pagos[['periodo', 'registros', 'total', 'desde', 'hasta']],

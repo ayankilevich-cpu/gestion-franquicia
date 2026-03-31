@@ -66,6 +66,7 @@ class ParserNacion(ParserPDF):
             ],
             'Préstamos Bancarios': [
                 'DEBITO PAGO PRESTAMO',
+                'PAGO PRESTAMO',
             ],
         }
     

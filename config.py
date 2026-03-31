@@ -150,6 +150,7 @@ CATEGORIAS_EGRESOS = {
     'Préstamos Bancarios': [
         'N/D DEBITO PRESTAMOS',
         'DEBITO PAGO PRESTAMO',
+        'PAGO PRESTAMO',  # Nación u otros (sin prefijo DEBITO)
         'Cobro de prestamo',
     ],
     'Intereses Bancarios': [

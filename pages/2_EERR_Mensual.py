@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import NOMBRE_EMPRESA, CATEGORIAS_EGRESO_EXCLUIDAS_EERR
 from utils.formato import formato_moneda, formato_porcentaje, formato_df_moneda, formato_df_porcentaje
+from utils.charts import grafico_barras_moneda
 
 st.set_page_config(page_title="EERR Mensual", page_icon="📊", layout="wide")
 
@@ -177,8 +178,8 @@ try:
                 st.caption("Bancarios operativos (sin transferencias enviadas).")
                 st.metric("Pagos en Efectivo", formato_moneda(total_efectivo))
             
-            # Gráfico
-            st.bar_chart(df_egresos.set_index('Categoría')['Monto'])
+            st.caption("Montos en etiquetas y tooltips: formato **$** con separador de miles (.)")
+            grafico_barras_moneda(df_egresos, "Categoría", "Monto", titulo="Egresos por categoría", horizontal=True)
         else:
             st.info("No hay egresos en este período")
     
@@ -224,16 +225,15 @@ try:
             if filtro_banco:
                 df_filtrado = df_filtrado[df_filtrado['banco'].isin(filtro_banco)]
             
-            # Mostrar
             st.dataframe(
-                df_filtrado[['fecha', 'banco', 'tipo', 'categoria', 'descripcion', 'debito', 'credito']],
+                df_filtrado[['fecha', 'banco', 'tipo', 'categoria', 'descripcion', 'debito', 'credito']].style.format(
+                    {"debito": formato_df_moneda, "credito": formato_df_moneda}
+                ),
                 use_container_width=True,
                 hide_index=True,
                 column_config={
                     "fecha": st.column_config.DateColumn("Fecha", format="DD/MM/YYYY"),
-                    "debito": st.column_config.NumberColumn("Débito", format="$%.2f"),
-                    "credito": st.column_config.NumberColumn("Crédito", format="$%.2f"),
-                }
+                },
             )
             
             st.caption(f"Mostrando {len(df_filtrado)} de {len(df_mov)} movimientos")
@@ -265,27 +265,21 @@ try:
             df_gasto_cat = df_gasto_cat.rename(columns={"_cat": "Categoría", "debito": "Monto"})
 
             if not df_gasto_cat.empty:
+                st.caption("Montos con **$** y separador de miles en gráficos y tabla.")
                 c1, c2 = st.columns([1, 1])
                 with c1:
                     st.markdown("**Por categoría**")
-                    st.bar_chart(
-                        df_gasto_cat.set_index("Categoría")["Monto"],
-                        use_container_width=True,
-                    )
+                    grafico_barras_moneda(df_gasto_cat, "Categoría", "Monto", horizontal=True)
                 with c2:
                     top_n = min(12, len(df_gasto_cat))
                     st.markdown(f"**Principales categorías (top {top_n})**")
-                    st.bar_chart(
-                        df_gasto_cat.head(top_n).set_index("Categoría")["Monto"],
-                        use_container_width=True,
+                    grafico_barras_moneda(
+                        df_gasto_cat.head(top_n), "Categoría", "Monto", horizontal=True
                     )
                 st.dataframe(
                     df_gasto_cat.style.format({"Monto": formato_df_moneda}),
                     use_container_width=True,
                     hide_index=True,
-                    column_config={
-                        "Monto": st.column_config.NumberColumn("Monto", format="$%.2f"),
-                    },
                 )
             else:
                 st.info("No hay débitos operativos para desglosar en este período (solo traspasos o transferencias enviadas).")
@@ -300,13 +294,14 @@ try:
             df_efectivo = pd.DataFrame(pagos_efectivo)
             
             st.dataframe(
-                df_efectivo[['fecha', 'concepto', 'categoria', 'monto']],
+                df_efectivo[['fecha', 'concepto', 'categoria', 'monto']].style.format(
+                    {"monto": formato_df_moneda}
+                ),
                 use_container_width=True,
                 hide_index=True,
                 column_config={
                     "fecha": st.column_config.DateColumn("Fecha", format="DD/MM/YYYY"),
-                    "monto": st.column_config.NumberColumn("Monto", format="$%.2f"),
-                }
+                },
             )
             
             total_efectivo = sum(float(p.get('monto', 0) or 0) for p in pagos_efectivo)
@@ -346,9 +341,14 @@ try:
             
             if not df_traspasos.empty:
                 st.dataframe(
-                    df_traspasos[['fecha', 'banco', 'descripcion', 'debito', 'credito']],
+                    df_traspasos[['fecha', 'banco', 'descripcion', 'debito', 'credito']].style.format(
+                        {"debito": formato_df_moneda, "credito": formato_df_moneda}
+                    ),
                     use_container_width=True,
-                    hide_index=True
+                    hide_index=True,
+                    column_config={
+                        "fecha": st.column_config.DateColumn("Fecha", format="DD/MM/YYYY"),
+                    },
                 )
         
         st.divider()

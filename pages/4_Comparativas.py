@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import NOMBRE_EMPRESA
 from utils.formato import formato_moneda, formato_porcentaje, formato_df_moneda, formato_df_porcentaje, formato_numero
+from utils.charts import grafico_barras_agrupadas_moneda
 
 st.set_page_config(page_title="Comparativas", page_icon="📉", layout="wide")
 
@@ -197,8 +198,10 @@ try:
         periodo1_label: [p1['ventas'], p1['egresos'], p1['resultado']],
         periodo2_label: [p2['ventas'], p2['egresos'], p2['resultado']]
     })
-    
-    st.bar_chart(df_chart.set_index('Concepto'))
+    st.caption("Montos en tooltip con **$** y separador de miles.")
+    grafico_barras_agrupadas_moneda(
+        df_chart, 'Concepto', [periodo1_label, periodo2_label], titulo='Comparativa por concepto'
+    )
     
     # =========================================
     # RESUMEN DE VARIACIONES

@@ -11,6 +11,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.formato import formato_moneda, formato_porcentaje, formato_df_moneda, formato_df_porcentaje
+from utils.flujo_caja import es_credito_deposito_efectivo_en_banco
 from db.queries import (
     obtener_periodos,
     obtener_movimientos_periodo,
@@ -85,7 +86,7 @@ for mov in movimientos:
         
         if mov.get('es_traspaso_interno'):
             traspasos_entrada += credito
-        elif 'Depósito' in categoria or 'DEPOSITO' in mov.get('descripcion', '').upper():
+        elif es_credito_deposito_efectivo_en_banco(mov):
             depositos_efectivo += credito
         elif banco == 'EFECTIVO':
             # Ingresos en efectivo (retiros por ventas)
@@ -121,6 +122,10 @@ total_egresos_efectivo = sum(egresos_efectivo.values())
 
 # Venta sistema (para referencia)
 venta_sistema = sum(float(v.get('venta_pesos', 0) or 0) for v in ventas)
+
+total_ingresos_flujo = total_ingresos_bancarios + total_ingresos_efectivo
+total_egresos_flujo = total_egresos_bancarios + total_egresos_efectivo
+flujo_neto = total_ingresos_flujo - total_egresos_flujo
 
 # =============================================================================
 # MOSTRAR RESULTADOS
@@ -160,16 +165,57 @@ with col4:
     )
 
 with col5:
-    # Flujo neto = Ingresos (bancos + efectivo) - Egresos (bancos + efectivo)
-    total_ingresos = total_ingresos_bancarios + total_ingresos_efectivo
-    total_egresos = total_egresos_bancarios + total_egresos_efectivo
-    flujo_neto = total_ingresos - total_egresos
     st.metric(
-        "📊 Flujo Neto", 
+        "📊 Flujo Neto",
         formato_moneda(flujo_neto, decimales=0),
         delta=f"{'Positivo' if flujo_neto > 0 else 'Negativo'}",
-        delta_color="normal" if flujo_neto > 0 else "inverse"
+        delta_color="normal" if flujo_neto > 0 else "inverse",
     )
+
+if venta_sistema > 0 and flujo_neto > venta_sistema * 2:
+    st.warning(
+        "El flujo neto es muy superior a la venta de sistema. Suele indicar **depósitos de "
+        "efectivo mal clasificados** (se cuentan como cobranza) o **créditos no operativos** "
+        "(préstamos, etc.). Revisá el diagnóstico abajo."
+    )
+
+with st.expander("🔍 Diagnóstico: mayores créditos bancarios del período"):
+    st.caption(
+        "Solo movimientos con crédito que **sí** entran en «Cobrado (Bancos)». "
+        "Si ves montos enormes que son depósitos de caja, revisá la categoría/descripción en el extracto."
+    )
+    cred_rows = []
+    for m in movimientos:
+        if m.get("es_traspaso_interno"):
+            continue
+        if (m.get("banco") or "") == "EFECTIVO":
+            continue
+        cr = float(m.get("credito") or 0)
+        if cr <= 0:
+            continue
+        if es_credito_deposito_efectivo_en_banco(m):
+            continue
+        cred_rows.append(
+            {
+                "Fecha": m.get("fecha"),
+                "Banco": m.get("banco"),
+                "Categoría": m.get("categoria") or "",
+                "Descripción": (m.get("descripcion") or "")[:80],
+                "Crédito": cr,
+            }
+        )
+    cred_rows.sort(key=lambda r: r["Crédito"], reverse=True)
+    if cred_rows:
+        st.dataframe(
+            pd.DataFrame(cred_rows[:25]).style.format({"Crédito": formato_df_moneda}),
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Fecha": st.column_config.DateColumn("Fecha", format="DD/MM/YYYY"),
+            },
+        )
+    else:
+        st.info("No hay créditos bancarios operativos en este período.")
 
 st.markdown("---")
 
@@ -322,7 +368,16 @@ with tab5:
                 }
                 for m in traspasos
             ])
-            st.dataframe(df_traspasos, use_container_width=True, hide_index=True)
+            st.dataframe(
+                df_traspasos.style.format(
+                    {"Débito": formato_df_moneda, "Crédito": formato_df_moneda}
+                ),
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Fecha": st.column_config.DateColumn("Fecha", format="DD/MM/YYYY"),
+                },
+            )
 
 # =============================================================================
 # RESUMEN FINAL

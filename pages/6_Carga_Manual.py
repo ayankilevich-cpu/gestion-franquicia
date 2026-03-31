@@ -1,10 +1,17 @@
 """
 Página para carga manual de gastos y ventas mensuales.
 """
+import os
+import sys
+
 import streamlit as st
 import pandas as pd
 from datetime import datetime, date
 import hashlib
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from utils.formato import formato_moneda, formato_numero, formato_df_moneda
+from utils.charts import grafico_barras_desde_serie
 
 st.set_page_config(page_title="Carga Manual", page_icon="✏️", layout="wide")
 
@@ -160,7 +167,7 @@ with tab1:
                     conn.close()
                     
                     tipo_texto = "Ingreso" if es_ingreso else "Gasto"
-                    st.success(f"✅ {tipo_texto} guardado: ${monto_mov:,.2f} - {descripcion_mov}")
+                    st.success(f"✅ {tipo_texto} guardado: {formato_moneda(monto_mov)} - {descripcion_mov}")
                     st.rerun()
                     
                 except Exception as e:
@@ -197,14 +204,15 @@ with tab1:
             })
             
             st.dataframe(
-                df_mov[['fecha', 'tipo_display', 'descripcion', 'categoria', 'monto']],
+                df_mov[['fecha', 'tipo_display', 'descripcion', 'categoria', 'monto']].style.format(
+                    {"monto": formato_df_moneda}
+                ),
                 use_container_width=True,
                 hide_index=True,
                 column_config={
                     "fecha": st.column_config.DateColumn("Fecha", format="DD/MM/YYYY"),
                     "tipo_display": "Tipo",
-                    "monto": st.column_config.NumberColumn("Monto", format="$%.2f"),
-                }
+                },
             )
             
             # Opción de eliminar
@@ -372,7 +380,10 @@ with tab2:
                     cursor.close()
                     conn.close()
                     
-                    st.success(f"✅ Traspaso registrado: ${monto_traspaso:,.2f} de {CUENTAS_BANCARIAS[cuenta_origen]} a {CUENTAS_BANCARIAS[cuenta_destino]}")
+                    st.success(
+                        f"✅ Traspaso registrado: {formato_moneda(monto_traspaso)} de "
+                        f"{CUENTAS_BANCARIAS[cuenta_origen]} a {CUENTAS_BANCARIAS[cuenta_destino]}"
+                    )
                     st.rerun()
                     
                 except Exception as e:
@@ -408,14 +419,15 @@ with tab2:
             )
             
             st.dataframe(
-                df_traspasos[['fecha', 'banco', 'tipo', 'descripcion', 'monto']],
+                df_traspasos[['fecha', 'banco', 'tipo', 'descripcion', 'monto']].style.format(
+                    {"monto": formato_df_moneda}
+                ),
                 use_container_width=True,
                 hide_index=True,
                 column_config={
                     "fecha": st.column_config.DateColumn("Fecha", format="DD/MM/YYYY"),
                     "banco": "Cuenta",
-                    "monto": st.column_config.NumberColumn("Monto", format="$%.2f"),
-                }
+                },
             )
             
             # Opción de eliminar traspasos
@@ -565,7 +577,10 @@ with tab3:
                             WHERE id = %s
                         """, (monto_retiro, descripcion_retiro, fecha_retiro, retiro_existente['id']))
                         conn.commit()
-                        st.success(f"✅ Retiro actualizado: ${monto_retiro:,.2f} (anterior: ${float(retiro_existente['credito']):,.2f})")
+                        st.success(
+                            f"✅ Retiro actualizado: {formato_moneda(monto_retiro)} "
+                            f"(anterior: {formato_moneda(float(retiro_existente['credito']))})"
+                        )
                     else:
                         # Crear nuevo
                         cursor.execute("""
@@ -579,7 +594,7 @@ with tab3:
                             0, monto_retiro, 0, False, hash_mov
                         ))
                         conn.commit()
-                        st.success(f"✅ Retiro registrado: ${monto_retiro:,.2f}")
+                        st.success(f"✅ Retiro registrado: {formato_moneda(monto_retiro)}")
                     
                     cursor.close()
                     conn.close()
@@ -610,26 +625,27 @@ with tab3:
             df_retiros = pd.DataFrame(retiros)
             df_retiros['periodo'] = df_retiros.apply(lambda r: f"{r['mes']:02d}/{r['anio']}", axis=1)
             
+            df_ret_show = df_retiros[['periodo', 'credito', 'descripcion']].rename(columns={
+                'periodo': 'Período',
+                'credito': 'Monto',
+                'descripcion': 'Descripción'
+            })
             st.dataframe(
-                df_retiros[['periodo', 'credito', 'descripcion']].rename(columns={
-                    'periodo': 'Período',
-                    'credito': 'Monto',
-                    'descripcion': 'Descripción'
-                }),
+                df_ret_show.style.format({"Monto": formato_df_moneda}),
                 use_container_width=True,
                 hide_index=True,
-                column_config={
-                    "Monto": st.column_config.NumberColumn(format="$%.2f"),
-                }
             )
-            
+
             total_retiros = sum(float(r['credito']) for r in retiros)
-            st.metric("Total Retiros Registrados", f"${total_retiros:,.2f}")
-            
+            st.metric("Total Retiros Registrados", formato_moneda(total_retiros))
+
             # Opción de eliminar retiro
             st.subheader("🗑️ Eliminar Retiro")
             ids_retiros = [r['id'] for r in retiros]
-            desc_retiros = {r['id']: f"{r['mes']:02d}/{r['anio']} - ${float(r['credito']):,.2f}" for r in retiros}
+            desc_retiros = {
+                r['id']: f"{r['mes']:02d}/{r['anio']} - {formato_moneda(float(r['credito']))}"
+                for r in retiros
+            }
             
             retiro_eliminar = st.selectbox(
                 "Seleccionar retiro a eliminar",
@@ -700,7 +716,7 @@ with tab4:
     # Mostrar precio promedio calculado
     if venta_kgs > 0 and venta_pesos > 0:
         precio_promedio = venta_pesos / venta_kgs
-        st.info(f"💰 **Precio promedio por kg:** ${precio_promedio:,.2f}")
+        st.info(f"💰 **Precio promedio por kg:** {formato_moneda(precio_promedio)}")
     
     sucursal_venta = st.text_input(
         "Sucursal (opcional)",
@@ -733,8 +749,8 @@ with tab4:
     if venta_existente:
         st.warning(f"""
         ⚠️ Ya existe una venta para {mes_venta:02d}/{anio_venta}:
-        - Pesos: ${float(venta_existente['venta_pesos']):,.2f}
-        - Kgs: {float(venta_existente['venta_kgs']):,.2f}
+        - Pesos: {formato_moneda(float(venta_existente['venta_pesos']))}
+        - Kgs: {formato_numero(float(venta_existente['venta_kgs']), 2)}
         """)
         reemplazar = st.checkbox("Reemplazar venta existente", key="confirm_replace_venta")
     
@@ -837,23 +853,37 @@ with tab4:
                 lambda x: f"{x['mes']:02d}/{x['anio']}", axis=1
             )
             
+            df_vshow = df_ventas[['periodo', 'venta_pesos', 'venta_kgs', 'precio_promedio_kg', 'sucursal']].copy()
+
+            def _fmt_kg_col(v):
+                try:
+                    if v is None or (isinstance(v, float) and pd.isna(v)):
+                        return "-"
+                    return formato_numero(float(v), 2)
+                except (TypeError, ValueError):
+                    return "-"
+
             st.dataframe(
-                df_ventas[['periodo', 'venta_pesos', 'venta_kgs', 'precio_promedio_kg', 'sucursal']],
+                df_vshow.style.format({
+                    "venta_pesos": formato_df_moneda,
+                    "venta_kgs": _fmt_kg_col,
+                    "precio_promedio_kg": formato_df_moneda,
+                }),
                 use_container_width=True,
                 hide_index=True,
                 column_config={
                     "periodo": "Período",
-                    "venta_pesos": st.column_config.NumberColumn("Venta ($)", format="$%.2f"),
-                    "venta_kgs": st.column_config.NumberColumn("Venta (kg)", format="%.2f kg"),
-                    "precio_promedio_kg": st.column_config.NumberColumn("$/kg Promedio", format="$%.2f"),
-                    "sucursal": "Sucursal"
-                }
+                    "sucursal": "Sucursal",
+                },
             )
-            
+
             # Opción de eliminar venta
             st.subheader("🗑️ Eliminar Venta Mensual")
             ids_ventas = [v['id'] for v in ventas]
-            desc_ventas = {v['id']: f"{v['mes']:02d}/{v['anio']} - ${float(v['venta_pesos']):,.2f}" for v in ventas}
+            desc_ventas = {
+                v['id']: f"{v['mes']:02d}/{v['anio']} - {formato_moneda(float(v['venta_pesos']))}"
+                for v in ventas
+            }
             
             venta_eliminar = st.selectbox(
                 "Seleccionar venta a eliminar",
@@ -883,11 +913,17 @@ with tab4:
                 
                 with col1:
                     st.write("**Ventas en Pesos**")
-                    st.bar_chart(df_chart.set_index('periodo_orden')['venta_pesos'])
-                
+                    st.caption("Montos con $ y separador de miles en etiquetas.")
+                    grafico_barras_desde_serie(
+                        df_chart.set_index("periodo_orden")["venta_pesos"],
+                        titulo="",
+                        horizontal=False,
+                    )
+
                 with col2:
                     st.write("**Ventas en Kg**")
-                    st.bar_chart(df_chart.set_index('periodo_orden')['venta_kgs'])
+                    st.caption("Kilogramos (sin símbolo $).")
+                    st.bar_chart(df_chart.set_index("periodo_orden")["venta_kgs"])
         else:
             st.info("No hay ventas cargadas")
         

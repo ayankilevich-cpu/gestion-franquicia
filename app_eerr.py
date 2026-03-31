@@ -13,12 +13,14 @@ import io
 
 # Importar funciones del módulo principal
 from resumen_macro import (
-    leer_pdf_texto, 
-    extraer_movimientos, 
-    generar_eerr, 
+    leer_pdf_texto,
+    extraer_movimientos,
+    generar_eerr,
     categorizar_movimiento,
-    CUIT_EMPRESA
+    CUIT_EMPRESA,
 )
+from utils.formato import formato_moneda
+from utils.charts import grafico_barras_moneda, grafico_lineas_multiserie_moneda
 
 # Configuración de la página
 st.set_page_config(
@@ -102,9 +104,9 @@ if uploaded_file is not None:
                             for k, v in sorted(eerr['ingresos'].items(), key=lambda x: -x[1])
                         ])
                         if not ingresos_df.empty:
-                            ingresos_df['Monto'] = ingresos_df['Monto'].apply(lambda x: f"${x:,.2f}")
+                            ingresos_df["Monto"] = ingresos_df["Monto"].apply(formato_moneda)
                             st.dataframe(ingresos_df, hide_index=True, use_container_width=True)
-                        st.metric("Total Ingresos", f"${eerr['total_ingresos']:,.2f}")
+                        st.metric("Total Ingresos", formato_moneda(eerr["total_ingresos"]))
                     
                     with col2:
                         st.subheader("📉 Egresos Operativos")
@@ -113,9 +115,9 @@ if uploaded_file is not None:
                             for k, v in sorted(eerr['egresos'].items(), key=lambda x: -x[1])
                         ])
                         if not egresos_df.empty:
-                            egresos_df['Monto'] = egresos_df['Monto'].apply(lambda x: f"${x:,.2f}")
+                            egresos_df["Monto"] = egresos_df["Monto"].apply(formato_moneda)
                             st.dataframe(egresos_df, hide_index=True, use_container_width=True)
-                        st.metric("Total Egresos", f"${eerr['total_egresos']:,.2f}")
+                        st.metric("Total Egresos", formato_moneda(eerr["total_egresos"]))
                     
                     st.markdown("---")
                     
@@ -125,9 +127,13 @@ if uploaded_file is not None:
                     
                     with col_res2:
                         if resultado >= 0:
-                            st.success(f"### ✅ Resultado Operativo Neto\n## ${resultado:,.2f}")
+                            st.success(
+                                f"### ✅ Resultado Operativo Neto\n## {formato_moneda(resultado)}"
+                            )
                         else:
-                            st.error(f"### ❌ Resultado Operativo Neto\n## ${resultado:,.2f}")
+                            st.error(
+                                f"### ❌ Resultado Operativo Neto\n## {formato_moneda(resultado)}"
+                            )
                     
                     # Traspasos internos
                     if eerr.get('traspasos_entrada', 0) > 0 or eerr.get('traspasos_salida', 0) > 0:
@@ -137,11 +143,11 @@ if uploaded_file is not None:
                         
                         col_t1, col_t2, col_t3 = st.columns(3)
                         with col_t1:
-                            st.metric("Entradas", f"${eerr.get('traspasos_entrada', 0):,.2f}")
+                            st.metric("Entradas", formato_moneda(eerr.get("traspasos_entrada", 0)))
                         with col_t2:
-                            st.metric("Salidas", f"${eerr.get('traspasos_salida', 0):,.2f}")
+                            st.metric("Salidas", formato_moneda(eerr.get("traspasos_salida", 0)))
                         with col_t3:
-                            st.metric("Neto", f"${eerr.get('traspasos_neto', 0):,.2f}")
+                            st.metric("Neto", formato_moneda(eerr.get("traspasos_neto", 0)))
                 
                 with tab2:
                     st.header("Detalle de Movimientos")
@@ -185,16 +191,29 @@ if uploaded_file is not None:
                     if cat_filtro:
                         df_filtrado = df_filtrado[df_filtrado['categoria'].isin(cat_filtro)]
                     
-                    # Mostrar tabla
+                    # Mostrar tabla (montos como texto $ argentino)
+                    df_tabla = (
+                        df_filtrado[
+                            ["fecha", "tipo", "categoria", "descripcion", "monto", "saldo"]
+                        ]
+                        .sort_values("fecha")
+                        .copy()
+                    )
+                    df_tabla["monto"] = df_tabla["monto"].apply(
+                        lambda x: formato_moneda(float(x))
+                    )
+                    df_tabla["saldo"] = df_tabla["saldo"].apply(
+                        lambda x: formato_moneda(float(x))
+                    )
                     st.dataframe(
-                        df_filtrado[['fecha', 'tipo', 'categoria', 'descripcion', 'monto', 'saldo']].sort_values('fecha'),
+                        df_tabla,
                         hide_index=True,
                         use_container_width=True,
                         column_config={
                             "fecha": st.column_config.DateColumn("Fecha", format="DD/MM/YY"),
-                            "monto": st.column_config.NumberColumn("Monto", format="$%.2f"),
-                            "saldo": st.column_config.NumberColumn("Saldo", format="$%.2f"),
-                        }
+                            "monto": st.column_config.TextColumn("Monto"),
+                            "saldo": st.column_config.TextColumn("Saldo"),
+                        },
                     )
                     
                     st.caption(f"Mostrando {len(df_filtrado)} de {len(df_mov)} movimientos")
@@ -207,21 +226,29 @@ if uploaded_file is not None:
                     
                     with col_g1:
                         st.subheader("Distribución de Ingresos")
-                        if eerr['ingresos']:
-                            ing_data = pd.DataFrame([
-                                {"Categoría": k, "Monto": v}
-                                for k, v in eerr['ingresos'].items()
-                            ])
-                            st.bar_chart(ing_data.set_index('Categoría'))
-                    
+                        if eerr["ingresos"]:
+                            ing_data = pd.DataFrame(
+                                [
+                                    {"Categoría": k, "Monto": v}
+                                    for k, v in eerr["ingresos"].items()
+                                ]
+                            )
+                            grafico_barras_moneda(
+                                ing_data, "Categoría", "Monto", "Ingresos por categoría"
+                            )
+
                     with col_g2:
                         st.subheader("Distribución de Egresos")
-                        if eerr['egresos']:
-                            egr_data = pd.DataFrame([
-                                {"Categoría": k, "Monto": v}
-                                for k, v in eerr['egresos'].items()
-                            ])
-                            st.bar_chart(egr_data.set_index('Categoría'))
+                        if eerr["egresos"]:
+                            egr_data = pd.DataFrame(
+                                [
+                                    {"Categoría": k, "Monto": v}
+                                    for k, v in eerr["egresos"].items()
+                                ]
+                            )
+                            grafico_barras_moneda(
+                                egr_data, "Categoría", "Monto", "Egresos por categoría"
+                            )
                     
                     # Flujo diario
                     st.subheader("Flujo de Caja Diario")
@@ -234,10 +261,23 @@ if uploaded_file is not None:
                         'debito': 'sum',
                         'credito': 'sum'
                     }).reset_index()
-                    df_diario['Flujo Neto'] = df_diario['credito'] - df_diario['debito']
-                    df_diario = df_diario.rename(columns={'fecha': 'Fecha', 'credito': 'Ingresos', 'debito': 'Egresos'})
-                    
-                    st.line_chart(df_diario.set_index('Fecha')[['Ingresos', 'Egresos', 'Flujo Neto']])
+                    df_diario["Flujo Neto"] = df_diario["credito"] - df_diario["debito"]
+                    df_diario = df_diario.rename(
+                        columns={
+                            "fecha": "Fecha",
+                            "credito": "Ingresos",
+                            "debito": "Egresos",
+                        }
+                    )
+                    df_diario = df_diario.sort_values("Fecha")
+                    df_linea = df_diario.copy()
+                    df_linea["Fecha"] = df_linea["Fecha"].astype(str)
+                    grafico_lineas_multiserie_moneda(
+                        df_linea,
+                        "Fecha",
+                        ["Ingresos", "Egresos", "Flujo Neto"],
+                        titulo="Flujo de caja diario",
+                    )
                 
                 with tab4:
                     st.header("Descargar Resultados")
