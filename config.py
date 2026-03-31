@@ -60,6 +60,12 @@ DB_CONFIG = {
 }
 
 # =============================================================================
+# EERR OPERATIVO — EXCLUSIONES
+# =============================================================================
+# Débitos bancarios con esta categoría no cuentan como gasto operativo (tesorería).
+CATEGORIAS_EGRESO_EXCLUIDAS_EERR = frozenset({'Transferencias Enviadas'})
+
+# =============================================================================
 # CATEGORÍAS DE INGRESOS (Créditos)
 # =============================================================================
 

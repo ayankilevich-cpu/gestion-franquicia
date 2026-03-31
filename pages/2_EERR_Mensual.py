@@ -13,7 +13,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config import NOMBRE_EMPRESA
+from config import NOMBRE_EMPRESA, CATEGORIAS_EGRESO_EXCLUIDAS_EERR
 from utils.formato import formato_moneda, formato_porcentaje, formato_df_moneda, formato_df_porcentaje
 
 st.set_page_config(page_title="EERR Mensual", page_icon="📊", layout="wide")
@@ -95,7 +95,7 @@ try:
         st.metric(
             "Total Egresos",
             formato_moneda(eerr['total_egresos']),
-            help="Gastos bancarios + Pagos en efectivo"
+            help="Gastos bancarios operativos + pagos en efectivo (sin transferencias enviadas ni traspasos internos)",
         )
     
     with col3:
@@ -117,7 +117,14 @@ try:
     # Alerta si no hay ventas cargadas
     if eerr['ventas_pesos'] == 0:
         st.warning("⚠️ No hay ventas cargadas para este período. Cargá las ventas en 'Carga Manual' para ver el resultado operativo real.")
-    
+
+    excl_te = float(eerr.get('monto_transferencias_enviadas_excluido_eerr') or 0)
+    if excl_te > 0:
+        st.info(
+            f"ℹ️ **Transferencias enviadas** no forman parte del gasto operativo en este EERR. "
+            f"Monto excluido del total de egresos: **{formato_moneda(excl_te)}**."
+        )
+
     st.markdown("---")
     
     # =========================================
@@ -165,8 +172,9 @@ try:
                 st.write("**Por origen:**")
                 total_bancario = sum(eerr['egresos_bancarios'].values())
                 total_efectivo = sum(eerr['egresos_efectivo'].values())
-                
+
                 st.metric("Gastos Bancarios", formato_moneda(total_bancario))
+                st.caption("Bancarios operativos (sin transferencias enviadas).")
                 st.metric("Pagos en Efectivo", formato_moneda(total_efectivo))
             
             # Gráfico
@@ -229,6 +237,58 @@ try:
             )
             
             st.caption(f"Mostrando {len(df_filtrado)} de {len(df_mov)} movimientos")
+
+            # Desglose de gastos bancarios operativos (gráficas)
+            st.markdown("---")
+            st.subheader("📊 Desglose de gastos bancarios (operativos)")
+            st.caption(
+                "Suma de **débitos** por categoría, excluyendo traspasos entre cuentas propias y "
+                "transferencias enviadas (no computadas como gasto en el EERR)."
+            )
+
+            df_deb = df_mov.copy()
+            df_deb["_es_tr"] = df_deb["es_traspaso_interno"].apply(
+                lambda x: bool(x) if x is not None else False
+            )
+            df_deb["_cat"] = df_deb["categoria"].fillna("Sin categoría")
+            mask_op = (
+                (df_deb["debito"].fillna(0).astype(float) > 0)
+                & (~df_deb["_es_tr"])
+                & (~df_deb["_cat"].isin(CATEGORIAS_EGRESO_EXCLUIDAS_EERR))
+            )
+            df_gasto_cat = (
+                df_deb.loc[mask_op]
+                .groupby("_cat", as_index=False)["debito"]
+                .sum()
+                .sort_values("debito", ascending=False)
+            )
+            df_gasto_cat = df_gasto_cat.rename(columns={"_cat": "Categoría", "debito": "Monto"})
+
+            if not df_gasto_cat.empty:
+                c1, c2 = st.columns([1, 1])
+                with c1:
+                    st.markdown("**Por categoría**")
+                    st.bar_chart(
+                        df_gasto_cat.set_index("Categoría")["Monto"],
+                        use_container_width=True,
+                    )
+                with c2:
+                    top_n = min(12, len(df_gasto_cat))
+                    st.markdown(f"**Principales categorías (top {top_n})**")
+                    st.bar_chart(
+                        df_gasto_cat.head(top_n).set_index("Categoría")["Monto"],
+                        use_container_width=True,
+                    )
+                st.dataframe(
+                    df_gasto_cat.style.format({"Monto": formato_df_moneda}),
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Monto": st.column_config.NumberColumn("Monto", format="$%.2f"),
+                    },
+                )
+            else:
+                st.info("No hay débitos operativos para desglosar en este período (solo traspasos o transferencias enviadas).")
         else:
             st.info("No hay movimientos bancarios en este período")
     

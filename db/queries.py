@@ -2,9 +2,14 @@
 Consultas SQL para el sistema de gestión financiera.
 """
 import hashlib
+import os
+import sys
 from datetime import datetime, date
 from typing import List, Dict, Optional, Tuple
 from collections import defaultdict
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from config import CATEGORIAS_EGRESO_EXCLUIDAS_EERR
 
 from .connection import get_connection
 
@@ -421,12 +426,14 @@ def obtener_eerr_operativo(periodo_id: int = None, anio: int = None, mes: int = 
     """
     Genera el EERR Operativo real:
     - Ingresos = Ventas del período
-    - Egresos = Gastos bancarios (débitos) + Pagos en efectivo
-    
-    NO considera los "ingresos" bancarios (transferencias, etc.) como ingresos operativos.
+    - Egresos = Gastos bancarios (débitos operativos) + Pagos en efectivo
+
+    NO considera ingresos bancarios como ingresos operativos.
+    Las categorías en CATEGORIAS_EGRESO_EXCLUIDAS_EERR (p. ej. transferencias enviadas)
+    no cuentan como gasto operativo.
     """
     from collections import defaultdict
-    
+
     # Obtener ventas del período
     ventas = obtener_ventas_periodo(periodo_id=periodo_id, anio=anio, mes=mes)
     
@@ -444,10 +451,11 @@ def obtener_eerr_operativo(periodo_id: int = None, anio: int = None, mes: int = 
     )
     
     egresos_bancarios = defaultdict(float)
+    monto_transferencias_enviadas_excluido = 0.0
     traspasos_salida = 0.0
     traspasos_entrada = 0.0
     ingresos_bancarios = defaultdict(float)  # Para mostrar aparte (informativo)
-    
+
     for mov in movimientos:
         if mov.get('es_traspaso_interno'):
             if mov['debito'] and float(mov['debito']) > 0:
@@ -457,7 +465,11 @@ def obtener_eerr_operativo(periodo_id: int = None, anio: int = None, mes: int = 
         else:
             categoria = mov.get('categoria', 'Sin categoría')
             if mov['debito'] and float(mov['debito']) > 0:
-                egresos_bancarios[categoria] += float(mov['debito'])
+                monto_d = float(mov['debito'])
+                if categoria in CATEGORIAS_EGRESO_EXCLUIDAS_EERR:
+                    monto_transferencias_enviadas_excluido += monto_d
+                else:
+                    egresos_bancarios[categoria] += monto_d
             if mov['credito'] and float(mov['credito']) > 0:
                 ingresos_bancarios[categoria] += float(mov['credito'])
     
@@ -479,18 +491,19 @@ def obtener_eerr_operativo(periodo_id: int = None, anio: int = None, mes: int = 
     
     total_egresos = sum(egresos_totales.values())
     total_ingresos_bancarios = sum(ingresos_bancarios.values())
-    
+
     return {
         # Ingresos operativos = Ventas
         'ventas_pesos': total_ventas_pesos,
         'ventas_kgs': total_ventas_kgs,
         'precio_promedio_kg': precio_promedio_kg,
-        
-        # Egresos consolidados
+
+        # Egresos consolidados (sin transferencias enviadas u otras exclusiones)
         'egresos': dict(egresos_totales),
         'egresos_bancarios': dict(egresos_bancarios),
         'egresos_efectivo': dict(egresos_efectivo),
         'total_egresos': total_egresos,
+        'monto_transferencias_enviadas_excluido_eerr': monto_transferencias_enviadas_excluido,
         
         # Resultado operativo
         'resultado_operativo': total_ventas_pesos - total_egresos,
@@ -503,7 +516,7 @@ def obtener_eerr_operativo(periodo_id: int = None, anio: int = None, mes: int = 
         'traspasos_salida': traspasos_salida,
         'traspasos_neto': traspasos_entrada - traspasos_salida,
         
-        # Flujo de caja (informativo)
+        # Flujo de caja (informativo): egresos bancarios incluye solo operativos en sum(...)
         'flujo_caja': total_ingresos_bancarios - sum(egresos_bancarios.values()) + traspasos_entrada - traspasos_salida,
     }
 
@@ -543,6 +556,7 @@ def obtener_resumen_anual(anio: int) -> Dict:
                     SELECT SUM(debito) 
                     FROM movimientos_bancarios 
                     WHERE periodo_id = p.id AND es_traspaso_interno = FALSE
+                    AND (categoria IS NULL OR categoria NOT IN ('Transferencias Enviadas'))
                 ), 0) as egresos_bancarios,
                 COALESCE((
                     SELECT SUM(monto) 
