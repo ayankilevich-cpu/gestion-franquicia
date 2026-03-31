@@ -2,7 +2,7 @@
 Parser para extractos bancarios del Banco Nación.
 """
 import re
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from datetime import datetime
 
 from .base_parser import ParserPDF
@@ -78,10 +78,29 @@ class ParserNacion(ParserPDF):
     
     def extraer_periodo(self, texto: str) -> Optional[Dict]:
         """Extrae información del período del extracto."""
-        # Buscar fechas en el formato DD/MM seguido de /YYYY
+        # Formato "Resumen de cuenta" / emisión mensual
+        m_per = re.search(
+            r'PERIODO:\s*(\d{2}/\d{2}/\d{4})\s+(?:AL|al)\s+(\d{2}/\d{2}/\d{4})',
+            texto,
+            re.IGNORECASE,
+        )
+        if m_per:
+            try:
+                fi = datetime.strptime(m_per.group(1), '%d/%m/%Y')
+                ff = datetime.strptime(m_per.group(2), '%d/%m/%Y')
+                return {
+                    'fecha_inicio': fi.date(),
+                    'fecha_fin': ff.date(),
+                    'anio': ff.year,
+                    'mes': ff.month,
+                }
+            except ValueError:
+                pass
+
+        # Formato antiguo: DD/MM en una línea y /YYYY en la siguiente
         fechas_encontradas = []
         lineas = texto.split('\n')
-        
+
         fecha_actual = None
         for linea in lineas:
             # Buscar DD/MM
@@ -89,7 +108,7 @@ class ParserNacion(ParserPDF):
             if match_dm:
                 fecha_actual = match_dm.group(1)
                 continue
-            
+
             # Buscar /YYYY
             if fecha_actual:
                 match_anio = re.match(r'^/(\d{4})', linea.strip())
@@ -97,35 +116,59 @@ class ParserNacion(ParserPDF):
                     try:
                         fecha = datetime.strptime(f"{fecha_actual}/{match_anio.group(1)}", '%d/%m/%Y')
                         fechas_encontradas.append(fecha)
-                    except:
+                    except ValueError:
                         pass
                     fecha_actual = None
-        
+
         if fechas_encontradas:
             fecha_inicio = min(fechas_encontradas)
             fecha_fin = max(fechas_encontradas)
-            
+
             return {
                 'fecha_inicio': fecha_inicio.date(),
                 'fecha_fin': fecha_fin.date(),
                 'anio': fecha_fin.year,
                 'mes': fecha_fin.month,
             }
-        
+
+        # Fallback: fechas DD/MM/YY en líneas de movimiento (resumen una línea)
+        fechas_yy = []
+        for linea in lineas:
+            m = re.match(r'^(\d{2}/\d{2}/\d{2})\s', linea.strip())
+            if m:
+                try:
+                    d, mo, y = m.group(1).split('/')
+                    y = int(y)
+                    full_y = 2000 + y if y < 70 else 1900 + y
+                    fechas_yy.append(datetime(int(full_y), int(mo), int(d)))
+                except (ValueError, IndexError):
+                    pass
+        if fechas_yy:
+            fecha_inicio = min(fechas_yy)
+            fecha_fin = max(fechas_yy)
+            return {
+                'fecha_inicio': fecha_inicio.date(),
+                'fecha_fin': fecha_fin.date(),
+                'anio': fecha_fin.year,
+                'mes': fecha_fin.month,
+            }
+
         return None
     
     def extraer_movimientos(self, texto: str) -> List[Dict]:
         """
         Extrae los movimientos del texto del extracto.
-        
-        Formato:
-        Línea 1: DD/MM $ (o DD/MM CONCEPTO_PARTE1 $)
-        Línea 2: COMPROBANTE CONCEPTO $ IMPORTE (o COMPROBANTE $ IMPORTE)
-        Línea 3: /YYYY [CONCEPTO_PARTE2] SALDO
+
+        Soporta resumen de cuenta (una línea: DD/MM/YY ... importe saldo) y el
+        formato antiguo en 3 líneas (DD/MM, comprobante/importe, /año saldo).
         """
+        mov_resumen = self._extraer_movimientos_resumen_cuenta(texto)
+        if mov_resumen:
+            return mov_resumen
+
         movimientos = []
         lineas = texto.split('\n')
-        
+
         i = 0
         while i < len(lineas) - 2:  # Necesitamos al menos 3 líneas
             linea1 = lineas[i].strip()
@@ -155,7 +198,122 @@ class ParserNacion(ParserPDF):
             i += 1
         
         return movimientos
-    
+
+    def _fecha_desde_ddmmyy(self, ddmmyy: str) -> datetime:
+        """Convierte DD/MM/YY a datetime (siglo 20xx para YY < 70)."""
+        d, m, y = ddmmyy.split('/')
+        yi = int(y)
+        full_y = 2000 + yi if yi < 70 else 1900 + yi
+        return datetime(full_y, int(m), int(d))
+
+    def _extraer_movimientos_resumen_cuenta(self, texto: str) -> List[Dict]:
+        """
+        Extracto 'RESUMEN DE CUENTA' (emisión mensual): una línea por movimiento.
+
+        Formato típico (texto pdfplumber):
+        DD/MM/YY CONCEPTO [COMPROB.] IMPORTE_MOVIMIENTO SALDO
+        El saldo puede terminar en '-' (saldo deudor).
+        Débito/crédito se obtiene del delta de saldo respecto al movimiento anterior.
+        """
+        lineas = texto.split('\n')
+        movimientos: List[Dict] = []
+
+        # Saldo inicial (si no está, se infiere con la primera línea)
+        prev_saldo = None
+        m_ant = re.search(
+            r'SALDO\s+ANTERIOR\s+((?:\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2})-?)',
+            texto,
+            re.IGNORECASE,
+        )
+        if m_ant:
+            prev_saldo = self._parsear_monto_nacion(m_ant.group(1))
+
+        pat_monto = r'(?:\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2})-?'
+
+        for linea in lineas:
+            linea = linea.strip()
+            if not linea or linea.startswith('____'):
+                continue
+            if 'FECHA MOVIMIENTOS' in linea and 'COMPROB' in linea:
+                continue
+            # Línea sin fecha (ej. "TRANSPORTE 1.912.410,26-")
+            if not re.match(r'^\d{2}/\d{2}/\d{2}\s', linea):
+                continue
+
+            m = re.match(r'^(\d{2}/\d{2}/\d{2})\s+(.+)$', linea)
+            if not m:
+                continue
+
+            resto = m.group(2)
+            matches = list(re.finditer(pat_monto, resto))
+            if len(matches) < 2:
+                continue
+
+            m_imp, m_saldo = matches[-2], matches[-1]
+            imp_str = resto[m_imp.start():m_imp.end()]
+            saldo_str = resto[m_saldo.start():m_saldo.end()]
+            concepto = resto[:m_imp.start()].strip()
+            concepto = re.sub(r'\s+', ' ', concepto).strip()
+            if not concepto:
+                continue
+
+            saldo = self._parsear_monto_nacion(saldo_str)
+            fecha = self._fecha_desde_ddmmyy(m.group(1))
+
+            if prev_saldo is None:
+                # Sin "SALDO ANTERIOR" en el texto: primera línea con heurística
+                imp_abs = abs(self._parsear_monto_nacion(imp_str))
+                cred, deb = self._credito_debito_desde_concepto_resumen(concepto, imp_abs)
+                prev_saldo = saldo - (cred - deb)
+
+            delta = saldo - prev_saldo
+            credito = max(delta, 0.0)
+            debito = max(-delta, 0.0)
+            prev_saldo = saldo
+
+            cuit_encontrado = ''
+            match_cuit = re.search(r'(\d{11})', f"{concepto} {linea}")
+            if match_cuit:
+                cuit_encontrado = match_cuit.group(1)
+
+            es_traspaso = cuit_encontrado == CUIT_EMPRESA
+            categoria = self._categorizar(concepto, debito > 0)
+            if es_traspaso:
+                categoria = '*** Traspasos entre Cuentas Propias ***'
+
+            movimientos.append({
+                'fecha': fecha,
+                'descripcion': concepto,
+                'referencia': '',
+                'debito': debito,
+                'credito': credito,
+                'saldo': saldo,
+                'categoria': categoria,
+                'es_traspaso_interno': es_traspaso,
+                'tipo': 'TRASPASO_INTERNO' if es_traspaso else ('DEBITO' if debito > 0 else 'CREDITO'),
+                'cuit_relacionado': cuit_encontrado,
+            })
+
+        return movimientos
+
+    def _credito_debito_desde_concepto_resumen(self, concepto: str, imp_abs: float) -> Tuple[float, float]:
+        """Si no hay saldo anterior, clasifica el importe como crédito o débito por texto."""
+        c = concepto.upper()
+        credito_keywords = (
+            'DEBIN', 'TRANSF.INT.DIST', 'C BE TR', 'CRED BE', 'CRED ',
+            'TRANSF.INT.DIST-LINKLAR',
+        )
+        debito_keywords = (
+            'DEB.TRAN', 'INTERB', 'COMISION', 'COMIS.', 'GRAVAMEN', 'I.V.A.',
+            'PAGO PRESTAMO', 'ECHEQ', 'RETEN.', '48HS', 'INTERESES', 'CAM.FED',
+            'CANJE O/BANCOS',
+        )
+        if any(k in c for k in credito_keywords):
+            return (imp_abs, 0.0)
+        if any(k in c for k in debito_keywords):
+            return (0.0, imp_abs)
+        return (imp_abs, 0.0)
+
     def _es_linea_ignorable(self, linea: str) -> bool:
         """Determina si una línea debe ignorarse."""
         patrones_ignorar = [
@@ -291,11 +449,14 @@ class ParserNacion(ParserPDF):
             return 0.0
         
         monto_str = monto_str.strip()
-        
-        # Detectar signo negativo
+
+        # Signo al inicio o al final (extractos Nación: "1.234,56-")
         es_negativo = monto_str.startswith('-')
         if es_negativo:
             monto_str = monto_str[1:]
+        if monto_str.endswith('-'):
+            es_negativo = True
+            monto_str = monto_str[:-1].strip()
         
         # Convertir formato argentino a float
         # Remover puntos de miles, cambiar coma por punto

@@ -20,7 +20,18 @@ SUCURSAL = 'La Falda'
 # =============================================================================
 
 def _get_streamlit_secrets():
-    """Obtiene secrets de Streamlit si existe el runtime."""
+    """
+    Secrets de Streamlit solo cuando corre el servidor Streamlit (no en scripts/CLI).
+    Evita importar streamlit.runtime en el arranque (lento) y no usa bool(st.secrets).
+    """
+    if not any(
+        os.environ.get(k)
+        for k in (
+            "STREAMLIT_SERVER_PORT",
+            "STREAMLIT_SERVER_ADDRESS",
+        )
+    ):
+        return {}
     try:
         import streamlit as st
         return st.secrets
@@ -30,8 +41,11 @@ def _get_streamlit_secrets():
 
 def _get_secret_or_env(secrets_obj, key: str, default=None):
     """Prioriza st.secrets y luego variables de entorno."""
-    if secrets_obj and key in secrets_obj:
+    # No usar `if secrets_obj`: en Streamlit, bool(st.secrets) dispara carga y puede fallar.
+    try:
         return secrets_obj[key]
+    except Exception:
+        pass
     return os.getenv(key, default)
 
 
